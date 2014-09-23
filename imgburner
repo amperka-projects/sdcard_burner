@@ -1,0 +1,107 @@
+#!/bin/bash
+
+DESTDEV=$1
+SRCDEV=$2
+
+LEDSET='/home/pi/led_set'
+BLOCK_SIZE='1M'
+
+PROG=$0
+USAGE="$PROG <dest-dev> <src-dev>"
+
+function fail {
+    echo "$PROG: $2" 1>&2
+
+    $LEDSET red on
+    $LEDSET green off
+    $LEDSET yellow off
+
+    exit $1
+}
+
+$LEDSET red on
+$LEDSET green on
+$LEDSET yellow on
+
+if [[ ! -b $DESTDEV ]]; then
+    fail 1 "Destination device not found."
+fi
+
+echo "$0: Destination device detected"
+
+if [[ ! -b $SRCDEV ]]; then
+    fail 1 "Source device not found."
+fi
+
+echo "$0: Source device detected"
+
+$LEDSET red on
+$LEDSET green off
+$LEDSET yellow off
+
+DEST_SIZE=$((`blockdev --getsize64 $DESTDEV`+0))
+SRC_SIZE=$((`blockdev --getsize64 $SRCDEV`+0))
+
+echo "$0: Size of destination device:" $((DEST_SIZE/1024/1024)) "MiB"
+echo "$0: Size of source device:" $((SRC_SIZE/1024/1024)) "MiB"
+
+if [[ $SRC_SIZE == 0 ]]; then
+    fail 1 "Source device is not ready."
+fi
+
+if [[ $DEST_SIZE == 0 ]]; then
+    fail 1 "Destination device is not ready."
+fi
+
+if [[ $DEST_SIZE < $SRC_SIZE ]]; then
+    fail 1 "Destination device too small."
+fi
+
+dd if=$SRCDEV of=$DESTDEV bs=$BLOCK_SIZE
+
+if [[ $? != 0 ]]; then
+    fail 1 "$0: I/O error burning."
+fi
+
+sync
+
+if [[ $? != 0 ]]; then
+    fail 1 "I/O error burning."
+fi
+
+echo "$0: Burning successfuly completed."
+
+$LEDSET red off
+$LEDSET yellow on
+$LEDSET green off
+
+BLOCK_COUNT=$((SRC_SIZE/1024/1024))
+
+echo "$0: Calculating source checksum..."
+
+dd if=$SRCDEV bs=1M count=$BLOCK_COUNT iflag=direct | md5sum >/tmp/imgburner-src.md5
+
+if [[ ${PIPESTATUS[0]} != 0 ]]; then
+    fail 1 "Error calculating source checksum."
+fi
+
+echo "$0: Calculating destination checksum..."
+
+dd if=$DESTDEV bs=1M count=$BLOCK_COUNT iflag=direct | md5sum >/tmp/imgburner-dst.md5
+
+if [[ ${PIPESTATUS[0]} != 0 ]]; then
+    fail 1 "Error calculating destination checksum."
+fi
+
+diff /tmp/imgburner-src.md5 /tmp/imgburner-dst.md5
+
+if [[ $? != 0 ]]; then
+    fail 1 "Verification error."
+fi
+
+$LEDSET red off
+$LEDSET yellow off
+$LEDSET green on
+
+echo "$0: Burning successfuly ended."
+

@@ -1,0 +1,61 @@
+#!/bin/bash
+#
+# Raspberry Pi gpio control script
+# Tested on Raspberry Pi B with Raspbian (NOT vanila)
+# To redefine number of leds and binding to gpio's just
+# fix $LEDS variable definition.
+#
+# Author: Levenkov A.A. (artem@levenkov.org)
+# (c) 2014 Amperka, http://www.amperka.ru/
+#
+
+PROG=$0
+USAGE="$PROG <led-num> <led-value>"
+
+# We use 3 leds: red = gpio2, yellow = gpio3, green = gpio4
+declare -A LEDS=( [1]=2 [2]=3 [3]=4 ["red"]=2 ["yellow"]=3 ["green"]=4 )
+declare -A VALUES=( [0]=0 [1]=1 ["on"]=1 ["off"]=0 )
+
+
+function fail {
+  echo -e "$PROG error: $2" 1>&2
+  exit $1
+}
+
+
+if [[ $# != 2 ]]; then
+  fail 1 "wrong arguments\nUsage: $USAGE"
+fi
+
+
+LED="${LEDS[$1]}"
+VALUE="${VALUES[$2]}"
+
+
+if [[ -z $LED ]]; then
+    POSSIBLE="${!LEDS[@]}"
+    fail 1 "Wrong <led-num>\nPossible values: $POSSIBLE"
+fi
+
+if [[ -z $VALUE ]]; then
+    POSSIBLE="${!VALUES[@]}"
+    fail 1 "Wrong <led-value>\nPossible values: $POSSIBLE"
+fi
+
+
+if [[ ! -d "/sys/class/gpio/gpio$LED" ]]; then
+    echo "Led is not initialized! Initialization..."
+    echo -n "Turning on gpio$LED control..."
+    echo $LED >"/sys/class/gpio/export"
+    sleep 0.1
+
+    if [[ ! -d "/sys/class/gpio/gpio$LED" ]]; then
+        echo "FAIL"
+        fail 1 "Cant turn on led #$LED control."
+    fi 
+    echo "OK"
+fi
+
+echo "out" >"/sys/class/gpio/gpio$LED/direction"
+echo $VALUE >"/sys/class/gpio/gpio$LED/value"
+

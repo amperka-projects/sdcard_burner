@@ -1,0 +1,35 @@
+#!/bin/bash
+
+SDCARD='usb-Generic-_SD_MMC_058F63646476-0:0'
+FLASH='usb-JetFlash_Transcend_8GB_AOJXDVM1-0:0-part1'
+
+if [[ -z $1 ]]; then
+    exit 0
+fi
+
+DEVPATH=`find /dev/disk/by-id/ -lname *$1`
+
+if [[ ! -b $DEVPATH ]]; then
+    exit 0
+fi
+
+DEVID=$(basename $DEVPATH)
+
+if [[ ! $DEVID == $SDCARD ]]; then
+    exit 0
+fi
+
+SDFLASHERD='/home/pi/imgburner'
+SDFLASHERD_RUN='/var/lock/sdflasherd.lock'
+
+function already_started {
+    echo 'Script already started.' 1>&2
+    exit 1
+}
+
+(
+    flock -x -w 1 200 || already_started
+
+    $SDFLASHERD $DEVPATH "/dev/disk/by-id/$FLASH"
+) 200>$SDFLASHERD_RUN
+
