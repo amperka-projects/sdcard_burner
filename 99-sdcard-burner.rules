@@ -1,1 +1,1 @@
-SUBSYSTEM=="block", ATTRS{idVendor}=="058f", ATTRS{idProduct}=="6364", RUN+="/home/pi/burn_sdcard %k"
+ENV{ACTION}=="change", ENV{DISK_MEDIA_CHANGE}=="1", ENV{ID_MODEL}=="SD_MMC", SUBSYSTEM=="block", ATTRS{idVendor}=="058f", ATTRS{idProduct}=="6364", RUN="/home/pi/sdcard_burner/burn_sdcard"

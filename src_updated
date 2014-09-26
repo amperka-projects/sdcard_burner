@@ -1,0 +1,164 @@
+#!/bin/bash
+
+LEDSOCKET='/var/run/ledd.sock'
+DEVPATH="/dev/disk/by-id/$ID_BUS-$ID_SERIAL-part1"
+SRCDEVNAME_FILE='/tmp/sdburner-src.devname'
+SRCCHKSUM_FILE='/tmp/sdburner-src.md5'
+BLOCK_SIZE='1M'
+
+PROG=$0
+USAGE="$PROG <dest-dev> <src-dev>"
+
+function fail {
+    echo "$PROG: $2" 1>&2
+
+    led blink off
+    led red on
+    led green off
+    led yellow off
+
+    exit $1
+}
+
+function dev_not_found {
+    led blink red off
+    led blink yellow off 
+    led blink green on
+
+    led_timeout '1.0'
+    led blink on
+
+    echo "$PROG: $2" 2>&1
+    exit $1
+}
+
+function dev_broken {
+    led blink red on
+    led blink yellow off 
+    led blink green off
+
+    led_timeout '0.5'
+    led blink on
+
+    echo "$PROG: $2" 2>&1
+    exit $1
+}
+
+function ledd_started {
+    [[ -p $LEDSOCKET ]] && return 0
+    return 1
+}
+
+function ledd_cmd {
+    ledd_started || return
+
+    echo "$1" >$LEDSOCKET
+    sync
+}
+
+# Variants:
+# led (red|yellow|green) (on|off)
+# led blink (red|yellow|green) (on|off)
+# led blink (on|off)
+
+function led {
+    if [ "x$1" = 'xblink' ]; then
+        if [[ "x$2" =~ ^x(on|off)$ ]]; then
+            st='off'
+            [ "x$2" = 'xon' ] && st='on'
+
+            ledd_cmd "blink $st"
+        else
+            name=$2
+            st='off'
+
+            [ "x$3" = 'xon' ] && st='on'
+            
+            ledd_cmd "blink $name $st"
+        fi
+    else
+        name=$1
+        value=$2
+
+        ledd_cmd "led $name $value"
+    fi
+
+}
+
+function led_timeout {
+    timeout=$1
+
+    ledd_started || return
+
+    echo "timeout $timeout" >$LEDSOCKET
+    sync
+}
+
+function led_init {
+    led_timeout '1.0'
+    led red off
+    led yellow off
+    led green off
+    led blink green on
+    led blink red off
+    led blink yellow off
+    led blink on
+}
+
+led_init
+
+if [[ "x$ACTION" = "xinfo" ]]; then
+    export >>/tmp/usb-storage.log
+fi
+
+if [[ "x$ACTION" = "xadd" ]]; then
+    # Adding flash drive
+    led blink green off
+    led blink red off
+    led blink yellow on
+    led_timeout '0.1'
+    led blink on
+
+    SRC_SIZE=$((`blockdev --getsize64 $DEVPATH`+0))
+
+    BLOCK_COUNT=$((SRC_SIZE/1024/1024))
+
+    if [[ $SRC_SIZE = 0 ]]; then
+        dev_broken 1 "Source device is not ready."
+    fi
+
+    dd if=$DEVPATH bs=1M count=$BLOCK_COUNT iflag=nocache | md5sum >$SRCCHKSUM_FILE
+
+    if [[ ${PIPESTATUS[0]} != 0 ]]; then
+        fail 1 "Error calculating source checksum."
+    fi
+
+    sync
+
+    if [[ $? != 0 ]]; then
+        fail 1 "Error calculating source checksum."
+    fi
+
+    led_timeout '0.5'
+    led blink green on
+    led blink red off
+    led blink yellow off
+    led yellow off
+    led blink on
+
+    echo $DEVPATH >$SRCDEVNAME_FILE
+fi
+
+if [[ "x$ACTION" = "xremove" ]]; then
+    # Removing flash drive
+    led blink green off
+    led blink red on
+    led blink yellow off
+    led green off
+    led yellow off
+    led_timeout '0.1'
+    led blink on
+
+    rm -f $SRCDEVNAME_FILE $SRCCHKSUM_FILE
+fi
+

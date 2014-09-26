@@ -1,25 +1,20 @@
 #!/bin/bash
 
-SDCARD='usb-Generic-_SD_MMC_058F63646476-0:0'
-FLASH='usb-JetFlash_Transcend_8GB_AOJXDVM1-0:0-part1'
+SDCARD="/dev/disk/by-id/$ID_BUS-$ID_SERIAL"
+FLASH=`cat /tmp/sdburner-src.devname`
+AFTER='mplayer /home/pi/1.mp3'
+LOGFILE='/var/log/sdflasher.log'
+FLASH_CHKSUM_FILE='/tmp/sdburner-src.md5'
 
 if [[ -z $1 ]]; then
     exit 0
 fi
 
-DEVPATH=`find /dev/disk/by-id/ -lname *$1`
-
-if [[ ! -b $DEVPATH ]]; then
+if [[ ! -b $SDCARD ]]; then
     exit 0
 fi
 
-DEVID=$(basename $DEVPATH)
-
-if [[ ! $DEVID == $SDCARD ]]; then
-    exit 0
-fi
-
-SDFLASHERD='/home/pi/imgburner'
+SDFLASHERD='/home/pi/sdcard_burner/imgburner'
 SDFLASHERD_RUN='/var/lock/sdflasherd.lock'
 
 function already_started {
@@ -30,6 +25,10 @@ function already_started {
 (
     flock -x -w 1 200 || already_started
 
-    $SDFLASHERD $DEVPATH "/dev/disk/by-id/$FLASH"
-) 200>$SDFLASHERD_RUN
+    $SDFLASHERD $SDCARD $FLASH $FLASH_CHKSUM_FILE
+
+    if [[ $? == 0 ]]; then
+        $AFTER
+    fi
+) >>$LOGFILE 2>&1 200>$SDFLASHERD_RUN
 

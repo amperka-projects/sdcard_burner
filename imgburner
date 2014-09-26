@@ -2,42 +2,126 @@
 
 DESTDEV=$1
 SRCDEV=$2
+SRCCHKSUM_FILE=$3
 
-LEDSET='/home/pi/led_set'
+LEDSOCKET='/var/run/ledd.sock'
 BLOCK_SIZE='1M'
 
 PROG=$0
-USAGE="$PROG <dest-dev> <src-dev>"
+USAGE="$PROG <dest-dev> <src-dev> <src-chksum-file>"
 
 function fail {
     echo "$PROG: $2" 1>&2
 
-    $LEDSET red on
-    $LEDSET green off
-    $LEDSET yellow off
+    led blink off
+    led red on
+    led green off
+    led yellow off
 
     exit $1
 }
 
-$LEDSET red on
-$LEDSET green on
-$LEDSET yellow on
+function dev_not_found {
+    led blink red off
+    led blink yellow off 
+    led blink green on
 
-if [[ ! -b $DESTDEV ]]; then
-    fail 1 "Destination device not found."
-fi
+    led_timeout '1.0'
+    led blink on
 
-echo "$0: Destination device detected"
+    echo "$PROG: $2" 2>&1
+    exit $1
+}
+
+function dev_broken {
+    led blink red on
+    led blink yellow off 
+    led blink green off
+
+    led_timeout '0.1'
+    led blink on
+
+    echo "$PROG: $2" 2>&1
+    exit $1
+}
+
+function ledd_started {
+    [[ -p $LEDSOCKET ]] && return 0
+    return 1
+}
+
+function ledd_cmd {
+    ledd_started || return
+
+    echo "$1" >$LEDSOCKET
+    sync
+}
+
+# Variants:
+# led (red|yellow|green) (on|off)
+# led blink (red|yellow|green) (on|off)
+# led blink (on|off)
+
+function led {
+    if [ "x$1" = 'xblink' ]; then
+        if [[ "x$2" =~ ^x(on|off)$ ]]; then
+            st='off'
+            [ "x$2" = 'xon' ] && st='on'
+
+            ledd_cmd "blink $st"
+        else
+            name=$2
+            st='off'
+
+            [ "x$3" = 'xon' ] && st='on'
+            
+            ledd_cmd "blink $name $st"
+        fi
+    else
+        name=$1
+        value=$2
+
+        ledd_cmd "led $name $value"
+    fi
+
+}
+
+function led_timeout {
+    timeout=$1
+
+    ledd_started || return
+
+    echo "timeout $timeout" >$LEDSOCKET
+    sync
+}
+
+function led_init {
+    led_timeout '1.0'
+    led red off
+    led yellow off
+    led green off
+    led blink green on
+    led blink red off
+    led blink yellow off
+    led blink on
+}
+
+
+led_init
 
 if [[ ! -b $SRCDEV ]]; then
-    fail 1 "Source device not found."
+    dev_broken 1 "Source device not found."
 fi
 
 echo "$0: Source device detected"
 
-$LEDSET red on
-$LEDSET green off
-$LEDSET yellow off
+if [[ ! -b $DESTDEV ]]; then
+    dev_not_found 1 "Destination device not found."
+fi
+
+echo "$0: Destination device detected"
+
+led_timeout '0.1'
 
 DEST_SIZE=$((`blockdev --getsize64 $DESTDEV`+0))
 SRC_SIZE=$((`blockdev --getsize64 $SRCDEV`+0))
@@ -46,21 +130,24 @@ echo "$0: Size of destination device:" $((DEST_SIZE/1024/1024)) "MiB"
 echo "$0: Size of source device:" $((SRC_SIZE/1024/1024)) "MiB"
 
 if [[ $SRC_SIZE == 0 ]]; then
-    fail 1 "Source device is not ready."
+    dev_broken 1 "Source device is not ready."
 fi
 
 if [[ $DEST_SIZE == 0 ]]; then
-    fail 1 "Destination device is not ready."
+    dev_not_found 1 "Destination device is not ready."
 fi
 
 if [[ $DEST_SIZE < $SRC_SIZE ]]; then
-    fail 1 "Destination device too small."
+    dev_broken 1 "Destination device too small."
 fi
 
-dd if=$SRCDEV of=$DESTDEV bs=$BLOCK_SIZE
+led blink yellow on
+led_timeout '0.3'
+
+dd if=$SRCDEV of=$DESTDEV bs=$BLOCK_SIZE oflag=nocache
 
 if [[ $? != 0 ]]; then
-    fail 1 "$0: I/O error burning."
+    fail 1 "I/O error burning."
 fi
 
 sync
@@ -71,18 +158,14 @@ fi
 
 echo "$0: Burning successfuly completed."
 
-$LEDSET red off
-$LEDSET yellow on
-$LEDSET green off
+led_timeout '0.5'
 
 BLOCK_COUNT=$((SRC_SIZE/1024/1024))
 
-echo "$0: Calculating source checksum..."
+echo "$0: Checking checksum file of source exists..."
 
-dd if=$SRCDEV bs=1M count=$BLOCK_COUNT iflag=direct | md5sum >/tmp/imgburner-src.md5
-
-if [[ ${PIPESTATUS[0]} != 0 ]]; then
-    fail 1 "Error calculating source checksum."
+if [[ ! -r $SRCCHKSUM_FILE ]]; then
+    fail 1 "Cant find checksum file ($SRCCHKSUM_FILE) of source device."
 fi
 
 echo "$0: Calculating destination checksum..."
@@ -93,15 +176,17 @@ if [[ ${PIPESTATUS[0]} != 0 ]]; then
     fail 1 "Error calculating destination checksum."
 fi
 
-diff /tmp/imgburner-src.md5 /tmp/imgburner-dst.md5
+diff $SRCCHKSUM_FILE /tmp/imgburner-dst.md5
 
 if [[ $? != 0 ]]; then
     fail 1 "Verification error."
 fi
 
-$LEDSET red off
-$LEDSET yellow off
-$LEDSET green on
+led blink off
+led green on
+led yellow off
 
 echo "$0: Burning successfuly ended."
+
+rm -f /tmp/imgburner-dst.md5
 

@@ -1,0 +1,149 @@
+#!/bin/bash
+#
+# Raspberry Pi leds daemon
+# Tested on Raspberry Pi B with Raspbian (NOT vanila)
+#
+# Author: Levenkov A.A. (artem@levenkov.org)
+# (c) 2014 Amperka, http://www.amperka.ru/
+#
+
+PROG=$0
+USAGE="$PROG"
+
+SOCKET='/var/run/ledd.sock'
+LEDSET='led_set'
+
+LOGFILE='/var/log/ledd.log'
+
+function first_fail {
+  echo -e "$PROG error: $2" 1>&2
+  exit $1
+}
+
+function fail {
+    rm -f $SOCKET
+    first_fail $1 $2
+}
+
+function quit {
+    rm -f $SOCKET
+    exit 0
+}
+
+trap "quit" SIGINT SIGTERM
+
+mkfifo -m 777 $SOCKET
+
+if [[ $? != 0 ]]; then
+    echo "$0: Cant create IPC channel." 1>&2
+
+    if [[ -p $SOCKET ]]; then
+        echo "$0: Maybe server already started?.." 1>&2
+
+        ping=`timeout 1 bash -c "echo ping >$SOCKET && cat $SOCKET"`
+
+        if [[ "x$ping" == 'xpong' ]]; then
+            first_fail 1 'Server already started.'
+        fi
+
+        echo 'Server not detected. Trying to use existing socket...'
+    else
+        first_fail 1 'Cant start server.'
+    fi
+fi
+
+timeout='0.1'
+blink=''
+blink_red=false
+blink_yellow=false
+blink_green=false
+
+(
+    $LEDSET red off
+    $LEDSET yellow off
+    $LEDSET green off
+
+    while ((1)); do
+    msg=`timeout $timeout cat $SOCKET`
+
+    if [[ ! -z $msg ]]; then
+        echo "$0: Command received: $msg"
+    fi
+
+    cmd=(${msg// / })
+
+    if [[ "x${cmd[0]}" == 'xquit' ]] &&
+       [[ -z "${cmd[1]}" ]]; then
+
+        $LEDSET red off
+        $LEDSET yellow off
+        $LEDSET green off
+
+        quit
+
+    fi
+
+    if [[ "x${cmd[0]}" == 'xping' ]] &&
+       [[ -z "${cmd[1]}" ]]; then
+
+        echo 'pong' >$SOCKET
+        continue
+    fi
+
+    if [[ "x${cmd[0]}" == 'xtimeout' ]] &&
+       [[ "x${cmd[1]}" =~ ^x([[:digit:]]+|0)\.{0,1}[[:digit:]]+$ ]] &&
+       [[ -z "${cmd[2]}" ]]; then
+
+        timeout="${cmd[1]}"
+
+        echo "$0: Timeout now is $timeout"
+
+        continue
+
+    fi
+
+    if [[ "x${cmd[0]}" == 'xblink' ]] && 
+       [[ "x${cmd[1]}" =~ ^x(on|off|red|yellow|green|1|2|3)+$ ]] &&
+       [[ "x${cmd[2]}" =~ ^x(on|off|0|1|)+$ ]] &&
+       [[ -z "${cmd[3]}" ]]; then
+
+        if [[ "${cmd[1]}" =~ ^(on|off)$ ]]; then
+            echo $blink
+            [[ "${cmd[1]}" == 'on' ]] && blink=0
+            [[ "${cmd[1]}" == 'off' ]] && blink=''
+        else 
+            if [[ "${cmd[2]}" =~ ^(on|1)$ ]]; then
+                value=true
+            else
+                value=false
+            fi
+
+            eval "blink_${cmd[1]}=$value"
+            echo "blink_${cmd[1]}=$value"
+        fi
+
+        continue
+
+    fi
+
+    if [[ "x${cmd[0]}" == "xled" ]] &&
+       [[ "x${cmd[1]}" =~ ^x(red|yellow|green|0|1|2)$ ]] &&
+       [[ "x${cmd[2]}" =~ ^x(on|off|0|1)$ ]] &&
+       [[ -z "${cmd[3]}" ]]; then
+
+        $LEDSET "${cmd[1]}" "${cmd[2]}"
+        continue
+
+    fi
+
+    if [[ ! -z $blink ]]; then
+        blink=$(((blink+1)%2))
+        echo "$0: blink - $blink"
+
+        [[ $blink_red = true ]] && $LEDSET red $blink
+        [[ $blink_yellow = true ]] && $LEDSET yellow $blink
+        [[ $blink_green = true ]] && $LEDSET green $blink
+    fi
+done
+) </dev/null >$LOGFILE 2>&1 &
+disown
