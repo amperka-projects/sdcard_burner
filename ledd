@@ -54,9 +54,131 @@ fi
 
 timeout='0.1'
 blink=''
+red='off'
+green='off'
+yellow='off'
 blink_red=false
 blink_yellow=false
 blink_green=false
+
+state=0
+
+function state_set {
+    state=$1
+
+    case $state in
+        'src_not_present' )
+            timeout='0.1'
+            green=off
+            yellow=off
+            blink_yellow=false
+            blink_green=false
+            blink_red=true
+            blink=0
+            ;;
+        'src_present' )
+            timeout='0.4'
+            green=off
+            red=on
+            blink_yellow=true
+            blink_green=false
+            blink_red=false
+            blink=0
+            ;;
+        'bad_src' )
+            green=off
+            yellow=off
+            red=on
+            blink_yellow=false
+            blink_green=false
+            blink_red=false
+            blink=''
+            ;;
+        'src_making_crc' )
+            timeout='0.1'
+            green=off
+            red=off
+            blink_yellow=true
+            blink_green=false
+            blink_red=false
+            blink=0
+            ;;
+        'src_ready' )
+            timeout='1.0'
+            yellow=off
+            red=off
+            blink_yellow=false
+            blink_green=true
+            blink_red=false
+            blink=0
+            ;;
+        'dst_present' )
+            timeout='0.5'
+            yellow=off
+            red=off
+            blink_yellow=false
+            blink_green=true
+            blink_red=false
+            blink=0
+            ;;
+        'bad_dst' )
+            green=off
+            yellow=off
+            red=on
+            blink_yellow=false
+            blink_green=false
+            blink_red=false
+            blink=''
+            ;;
+        'dst_inprogress' )
+            timeout='0.1'
+            yellow=off
+            red=off
+            blink_yellow=false
+            blink_green=true
+            blink_red=false
+            blink=0
+            ;;
+        'dst_write_error' )
+            timeout='1.0'
+            yellow=off
+            red=on
+            blink_yellow=false
+            blink_green=true
+            blink_red=false
+            blink=0
+            ;;
+        'dst_checking' )
+            timeout='0.1'
+            green=on
+            red=off
+            blink_yellow=true
+            blink_green=false
+            blink_red=false
+            blink=0
+            ;;
+        'dst_check_error' )
+            green=off
+            yellow=off
+            red=on
+            blink_yellow=false
+            blink_green=false
+            blink_red=false
+            blink=''
+            ;;
+        'dst_ready' )
+            green=on
+            yellow=off
+            red=off
+            blink_yellow=false
+            blink_green=false
+            blink_red=false
+            blink=''
+            ;;
+    esac
+}
+
+state_set 'src_not_present'
 
 (
     $LEDSET red off
@@ -72,6 +194,13 @@ blink_green=false
 
     cmd=(${msg// / })
 
+     #  [[ "x${cmd[1]}" =~ ^x(src_not_present|src_present|bad_src|src_ready|dst_present|bad_dst|dst_inprocess|dst_werror|dst_checking|dst_check_error|done)$ ]] &&
+    if [[ "x${cmd[0]}" == 'xset_state' ]] &&
+       [[ -z "${cmd[2]}" ]]; then
+       state_set ${cmd[1]} 
+    fi
+
+
     if [[ "x${cmd[0]}" == 'xquit' ]] &&
        [[ -z "${cmd[1]}" ]]; then
 
@@ -83,66 +212,24 @@ blink_green=false
 
     fi
 
-    if [[ "x${cmd[0]}" == 'xping' ]] &&
-       [[ -z "${cmd[1]}" ]]; then
+    blink=$(((blink+1)%2))
 
-        echo 'pong' >$SOCKET
-        continue
+    if [[ $blink_red = true ]]; then
+        $LEDSET red $blink
+    else
+        $LEDSET red $red
     fi
 
-    if [[ "x${cmd[0]}" == 'xtimeout' ]] &&
-       [[ "x${cmd[1]}" =~ ^x([[:digit:]]+|0)\.{0,1}[[:digit:]]+$ ]] &&
-       [[ -z "${cmd[2]}" ]]; then
-
-        timeout="${cmd[1]}"
-
-        echo "$0: Timeout now is $timeout"
-
-        continue
-
+    if [[ $blink_yellow = true ]]; then
+        $LEDSET yellow $blink
+    else
+        $LEDSET yellow $yellow
     fi
 
-    if [[ "x${cmd[0]}" == 'xblink' ]] && 
-       [[ "x${cmd[1]}" =~ ^x(on|off|red|yellow|green|1|2|3)+$ ]] &&
-       [[ "x${cmd[2]}" =~ ^x(on|off|0|1|)+$ ]] &&
-       [[ -z "${cmd[3]}" ]]; then
-
-        if [[ "${cmd[1]}" =~ ^(on|off)$ ]]; then
-            echo $blink
-            [[ "${cmd[1]}" == 'on' ]] && blink=0
-            [[ "${cmd[1]}" == 'off' ]] && blink=''
-        else 
-            if [[ "${cmd[2]}" =~ ^(on|1)$ ]]; then
-                value=true
-            else
-                value=false
-            fi
-
-            eval "blink_${cmd[1]}=$value"
-            echo "blink_${cmd[1]}=$value"
-        fi
-
-        continue
-
-    fi
-
-    if [[ "x${cmd[0]}" == "xled" ]] &&
-       [[ "x${cmd[1]}" =~ ^x(red|yellow|green|0|1|2)$ ]] &&
-       [[ "x${cmd[2]}" =~ ^x(on|off|0|1)$ ]] &&
-       [[ -z "${cmd[3]}" ]]; then
-
-        $LEDSET "${cmd[1]}" "${cmd[2]}"
-        continue
-
-    fi
-
-    if [[ ! -z $blink ]]; then
-        blink=$(((blink+1)%2))
-        echo "$0: blink - $blink"
-
-        [[ $blink_red = true ]] && $LEDSET red $blink
-        [[ $blink_yellow = true ]] && $LEDSET yellow $blink
-        [[ $blink_green = true ]] && $LEDSET green $blink
+    if [[ $blink_green = true ]]; then
+        $LEDSET green $blink
+    else
+        $LEDSET green $green
     fi
 done
 ) </dev/null >$LOGFILE 2>&1 &
