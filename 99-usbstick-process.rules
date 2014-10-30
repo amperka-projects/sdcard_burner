@@ -1,2 +1,2 @@
-ENV{ACTION}=="add", ENV{SUBSYSTEM}=="block", ENV{DEVTYPE}=="partition", RUN="/home/pi/sdcard_burner/src_updated"
-ENV{ACTION}=="remove", ENV{SUBSYSTEM}=="block", ENV{DEVTYPE}=="partition", RUN="/home/pi/sdcard_burner/src_updated"
+ENV{ACTION}=="add", ENV{SUBSYSTEM}=="block", ENV{DEVTYPE}=="partition", ENV{ID_MODEL}!="SD_MMC", RUN="/home/pi/sdcard_burner/src_updated"
+ENV{ACTION}=="remove", ENV{SUBSYSTEM}=="block", ENV{DEVTYPE}=="partition", ENV{ID_MODEL}!="SD_MMC", RUN="/home/pi/sdcard_burner/src_updated"
